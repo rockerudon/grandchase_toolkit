@@ -1,0 +1,85 @@
+{
+    "_comment": "Offsets das funções crypto no GrandChase.exe (RVAs relativos ao módulo base)",
+    "_updated": "2026-04",
+    "_module_size": 43421696,
+    "_notes": "MODE_INIT é sempre exatamente 0xC0 bytes depois de CIPHER_INIT",
+    "aes": {
+        "CIPHER_INIT": {
+            "rva": "0x1234100",
+            "description": "Inicialização AES — captura chave de 32 bytes em args[1]",
+            "signature_hex": "4c89442418488954241048894c24084883ec28",
+            "signature_len": 19
+        },
+        "MODE_INIT": {
+            "rva": "0x12341c0",
+            "description": "Inicialização CBC mode — captura IV de 16 bytes em args[2], filtrar dir==0 (decrypt)",
+            "signature_hex": "44894c24204c89442418488954241048894c24084883ec28",
+            "signature_len": 24,
+            "relation": "CIPHER_INIT + 0xC0"
+        },
+        "BULK_DEC": {
+            "rva": "0xaa9270",
+            "description": "Decrypt em bloco — para verificação (nota: retorna passthrough no build atual)",
+            "signature_hex": "4883ec38488b0144884c24204533c9ff50304883c438c3",
+            "signature_len": 22
+        }
+    },
+    "blowfish_stg": {
+        "BF_SET_KEY": {
+            "rva": "0x137F7C0",
+            "description": "BF_set_key(ctx, key_ptr, key_len=32, init) — captura chave BF para STG",
+            "notes": "Offset do build anterior, pode precisar atualização"
+        },
+        "BF_ECB": {
+            "rva": "0x137FD60",
+            "description": "BF_ECB(ctx, data_ptr, data_len, mode) — mode=0 decrypt",
+            "notes": "Offset do build anterior, pode precisar atualização"
+        },
+        "STG_LOAD": {
+            "rva": "0x136A0B0",
+            "description": "Carregador de recursos — fornece nome do arquivo sendo carregado",
+            "notes": "Offset do build anterior, pode precisar atualização"
+        },
+        "STG_DECRYPT": {
+            "rva": "0x1376180",
+            "description": "Wrapper de decriptação STG — chama BF_set_key + BF_ECB",
+            "notes": "Offset do build anterior, pode precisar atualização"
+        }
+    },
+    "algo2_table": {
+        "rva": "0x1dd3de0",
+        "description": "Tabela de valores Blowfish na memória (5×int64 por entrada, 40 bytes)",
+        "entries": 13790,
+        "notes": "Extraída via frida_extract_algo2_table — raramente muda entre updates"
+    },
+    "history": [
+        {
+            "date": "2026-02",
+            "module_size": 44843008,
+            "CIPHER_INIT": "0x1384040",
+            "MODE_INIT": "0x1384100",
+            "BULK_DEC": "0xb7eed0"
+        },
+        {
+            "date": "2026-03",
+            "module_size": 45031424,
+            "CIPHER_INIT": "0x13d88d0",
+            "MODE_INIT": "0x13d8990",
+            "BULK_DEC": "0xba0460"
+        },
+        {
+            "date": "2026-04",
+            "module_size": 43409408,
+            "MODE_INIT": "0x1234510",
+            "CIPHER_INIT": "0x1234450",
+            "BULK_DEC": "0xaa9e80"
+        },
+        {
+            "date": "2026-04",
+            "module_size": 43421696,
+            "MODE_INIT": "0x12341c0",
+            "CIPHER_INIT": "0x1234100",
+            "BULK_DEC": "0xaa9270"
+        }
+    ]
+}

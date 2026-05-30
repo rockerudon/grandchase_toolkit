@@ -1,0 +1,6 @@
+# Grand Chase Classic Toolkit - Dependencies
+# pip install -r requirements.txt
+
+pycryptodome>=3.19.0    # AES-256-CBC, Blowfish-ECB
+frida>=16.0.0           # Runtime hooks (only for scripts 01-03)
+frida-tools>=12.0.0     # Frida CLI tools
