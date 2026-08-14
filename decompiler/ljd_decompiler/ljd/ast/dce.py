@@ -137,6 +137,14 @@ class _UseTracker(traverse.Visitor):
     # -- scope management --
 
     def visit_function_definition(self, node):
+        # A child closure reading a captured parent local is a real read of
+        # that parent slot.  Without this link DCE removes the initializer and
+        # leaves every child upvalue undefined in the generated Lua.
+        if self._func_stack:
+            for reference in getattr(node, "_upvalues", None) or []:
+                if reference & 0x8000:
+                    self._func_stack[-1]["read_slots"].add(reference & 0x3FFF)
+
         self._func_stack.append({
             "write_map": defaultdict(list),  # slot -> [Assignment node, ...]
             "read_slots": set(),             # slot numbers that are READ

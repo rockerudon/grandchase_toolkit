@@ -1,24 +1,24 @@
 {
     "_comment": "Offsets das funções crypto no GrandChase.exe (RVAs relativos ao módulo base)",
-    "_updated": "2026-04",
-    "_module_size": 43421696,
+    "_updated": "2026-08",
+    "_module_size": 43532288,
     "_notes": "MODE_INIT é sempre exatamente 0xC0 bytes depois de CIPHER_INIT",
     "aes": {
         "CIPHER_INIT": {
-            "rva": "0x1234100",
+            "rva": "0x12619a0",
             "description": "Inicialização AES — captura chave de 32 bytes em args[1]",
             "signature_hex": "4c89442418488954241048894c24084883ec28",
             "signature_len": 19
         },
         "MODE_INIT": {
-            "rva": "0x12341c0",
+            "rva": "0x1261a60",
             "description": "Inicialização CBC mode — captura IV de 16 bytes em args[2], filtrar dir==0 (decrypt)",
             "signature_hex": "44894c24204c89442418488954241048894c24084883ec28",
             "signature_len": 24,
             "relation": "CIPHER_INIT + 0xC0"
         },
         "BULK_DEC": {
-            "rva": "0xaa9270",
+            "rva": "0xd403c0",
             "description": "Decrypt em bloco — para verificação (nota: retorna passthrough no build atual)",
             "signature_hex": "4883ec38488b0144884c24204533c9ff50304883c438c3",
             "signature_len": 22
@@ -76,10 +76,73 @@
         },
         {
             "date": "2026-04",
-            "module_size": 43421696,
-            "MODE_INIT": "0x12341c0",
-            "CIPHER_INIT": "0x1234100",
-            "BULK_DEC": "0xaa9270"
+            "module_size": 43589632,
+            "MODE_INIT": "0x124e8a0",
+            "CIPHER_INIT": "0x124e7e0",
+            "BULK_DEC": "0x9bbcc0"
+        },
+        {
+            "date": "2026-04",
+            "module_size": 43589632,
+            "MODE_INIT": "0x124e8a0",
+            "CIPHER_INIT": "0x124e7e0",
+            "BULK_DEC": "0x9bbcc0"
+        },
+        {
+            "date": "2026-04",
+            "module_size": 43589632,
+            "MODE_INIT": "0x124e8a0",
+            "CIPHER_INIT": "0x124e7e0",
+            "BULK_DEC": "0x9bbcc0"
+        },
+        {
+            "date": "2026-04",
+            "module_size": 43589632,
+            "MODE_INIT": "0x124e8a0",
+            "CIPHER_INIT": "0x124e7e0",
+            "BULK_DEC": "0x9bbcc0"
+        },
+        {
+            "date": "2026-04",
+            "module_size": 43589632,
+            "MODE_INIT": "0x124e8a0",
+            "CIPHER_INIT": "0x124e7e0",
+            "BULK_DEC": "0x9bbcc0"
+        },
+        {
+            "date": "2026-05",
+            "module_size": 42373120,
+            "MODE_INIT": "0x119dc20",
+            "CIPHER_INIT": "0x119db60",
+            "BULK_DEC": "0x5bc960"
+        },
+        {
+            "date": "2026-06",
+            "module_size": 42545152,
+            "MODE_INIT": "0x11b8710",
+            "CIPHER_INIT": "0x11b8650",
+            "BULK_DEC": "0x5bc0d0"
+        },
+        {
+            "date": "2026-07",
+            "module_size": 42971136,
+            "MODE_INIT": "0x11fce80",
+            "CIPHER_INIT": "0x11fcdc0",
+            "BULK_DEC": "0xdf3c90"
+        },
+        {
+            "date": "2026-07",
+            "module_size": 43368448,
+            "MODE_INIT": "0x1245140",
+            "CIPHER_INIT": "0x1245080",
+            "BULK_DEC": "0xd3e6d0"
+        },
+        {
+            "date": "2026-08",
+            "module_size": 43532288,
+            "MODE_INIT": "0x1261a60",
+            "CIPHER_INIT": "0x12619a0",
+            "BULK_DEC": "0xd403c0"
         }
     ]
 }
