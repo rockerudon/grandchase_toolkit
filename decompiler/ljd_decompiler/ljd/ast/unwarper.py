@@ -61,6 +61,14 @@ def _glue_flows(node):
 	for statements in _gather_statements_lists(node):
 		blocks = statements.contents
 
+		# Earlier unwarp phases replace successfully structured scopes with
+		# ordinary Lua statements.  The collector also sees those nested
+		# StatementsLists; they are no longer CFG block arrays and must not be
+		# passed to the flow gluer.
+		if not blocks or not all(isinstance(block, nodes.Block)
+				for block in blocks):
+			continue
+
 		if not isinstance(blocks[-1].warp, nodes.EndWarp):
 			# Can't glue — unwarping was incomplete for this scope
 			continue

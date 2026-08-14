@@ -9,6 +9,92 @@ import ljd.ast.nodes as nodes
 import ljd.ast.traverse as traverse
 
 
+# Names below belong to the Lua host/engine.  A stripped bytecode register may
+# temporarily copy one of them, but the register itself must never be renamed
+# back to the global name.  Doing that turns harmless register stores into Lua
+# assignments such as ``g_MyD3D = 0`` and destroys the host object at runtime.
+_PROTECTED_GLOBAL_NAMES = {
+    "g_MyD3D",
+    "g_kControls",
+    "StateFunc",
+    "Player_Action",
+    "DamageTemplate",
+    "characterActionTable",
+    "SkillConfigFunc",
+    "math",
+    "string",
+    "table",
+    "coroutine",
+    "io",
+    "os",
+    "debug",
+    "package",
+    "utf8",
+    "bit",
+    "pairs",
+    "ipairs",
+    "next",
+    "type",
+    "tonumber",
+    "tostring",
+    "assert",
+    "error",
+    "pcall",
+    "xpcall",
+    "select",
+    "unpack",
+    "print",
+}
+
+_PROTECTED_ALIAS_NAMES = {
+    "g_MyD3D": "engineRef",
+    "g_kControls": "controlsRef",
+    "StateFunc": "stateFuncRef",
+    "Player_Action": "playerActionRef",
+    "DamageTemplate": "damageTemplateRef",
+    "characterActionTable": "actionTableRef",
+    "SkillConfigFunc": "skillConfigRef",
+    "math": "mathRef",
+    "string": "stringRef",
+    "table": "tableRef",
+    "coroutine": "coroutineRef",
+    "io": "ioRef",
+    "os": "osRef",
+    "debug": "debugRef",
+    "package": "packageRef",
+    "utf8": "utf8Ref",
+    "bit": "bitRef",
+    "pairs": "pairsRef",
+    "ipairs": "ipairsRef",
+    "next": "nextRef",
+    "type": "typeRef",
+    "tonumber": "tonumberRef",
+    "tostring": "tostringRef",
+    "assert": "assertRef",
+    "error": "errorRef",
+    "pcall": "pcallRef",
+    "xpcall": "xpcallRef",
+    "select": "selectRef",
+    "unpack": "unpackRef",
+    "print": "printRef",
+}
+
+
+def _safe_slot_name(name, slot):
+    """Return a register name that cannot shadow a host global."""
+    if not name:
+        return "local" + str(slot)
+
+    if name in _PROTECTED_ALIAS_NAMES:
+        return _PROTECTED_ALIAS_NAMES[name]
+
+    if name.startswith("g_"):
+        tail = name[2:] or "global"
+        return tail[0].lower() + tail[1:] + "Ref"
+
+    return name
+
+
 def rename_slots(ast):
     """Post-process AST to rename remaining T_SLOT identifiers."""
     traverse.traverse(_SlotRenamer(), ast)
@@ -183,6 +269,10 @@ class _SlotRenamer(traverse.Visitor):
             return True
         if node.type == nodes.Identifier.T_LOCAL and not node.name:
             return True
+        if node.type == nodes.Identifier.T_LOCAL and (
+            node.name in _PROTECTED_GLOBAL_NAMES or node.name.startswith("g_")
+        ):
+            return True
         return False
 
     # -- Function scope -------------------------------------------------------
@@ -213,6 +303,8 @@ class _SlotRenamer(traverse.Visitor):
         used_names = set()
         for info in sorted(slots.values(), key=lambda x: x.slot):
             name = _determine_name(info, used_names)
+            name = _safe_slot_name(name, info.slot)
+            name = _make_unique(name, used_names)
             if name:
                 info.name = name
                 used_names.add(name)

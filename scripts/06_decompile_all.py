@@ -30,12 +30,19 @@ import io
 import time
 import threading
 import argparse
+import re
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TOOLKIT_ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+# Detecção flexível do TOOLKIT_ROOT e PROJECT_ROOT
+if os.path.basename(os.path.dirname(SCRIPT_DIR)) == 'toolkit':
+    TOOLKIT_ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+    PROJECT_ROOT = os.path.normpath(os.path.join(TOOLKIT_ROOT, ".."))
+else:
+    TOOLKIT_ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+    PROJECT_ROOT = TOOLKIT_ROOT
 
-DEFAULT_INPUT = os.path.join(TOOLKIT_ROOT, "output", "decrypted")
-DEFAULT_OUTPUT = os.path.join(TOOLKIT_ROOT, "output", "decompiled")
+DEFAULT_INPUT = os.path.join(PROJECT_ROOT, "output", "decrypted")
+DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "output", "decompiled")
 
 # Adicionar LJD ao path
 LJD_PATH = os.path.join(TOOLKIT_ROOT, "decompiler", "ljd_decompiler")
@@ -49,6 +56,77 @@ DECOMPILE_TIMEOUT_PER_MB = 60  # segundos adicionais por MB
 KL_MAGIC = b'\x1bKL\x84'
 LJ_MAGIC = b'\x1bLJ'
 STG_BOM = b'\xff\xfe'
+
+_ENGINE_GLOBAL_WRITE_RE = re.compile(
+    r"(?m)^[ \t]+(?:g_MyD3D|g_kControls)\s*="
+)
+
+_PROTECTED_SLOT_ALIAS_RE = re.compile(
+    r"\b(?:engineRef|controlsRef|stateFuncRef|playerActionRef|"
+    r"damageTemplateRef|actionTableRef|skillConfigRef|mathRef|stringRef|"
+    r"tableRef|coroutineRef|ioRef|osRef|debugRef|packageRef|utf8Ref|bitRef|"
+    r"pairsRef|ipairsRef|nextRef|typeRef|tonumberRef|tostringRef|assertRef|"
+    r"errorRef|pcallRef|xpcallRef|selectRef|unpackRef|printRef)\d*\b"
+)
+_FUNCTION_LINE_RE = re.compile(r"^(?P<indent>[ \t]*)(?:function\b|.*=\s*function\b)")
+
+
+def _localize_protected_slot_aliases(source):
+    """Declare protected slot aliases inside the generated function scope.
+
+    The aliases are names created by slotrenamer for bytecode registers.  They
+    must not leak into Lua's global table merely because stripped bytecode does
+    not retain the original local-variable declarations.
+    """
+    lines = source.splitlines()
+    insertions = []
+
+    for index, line in enumerate(lines):
+        match = _FUNCTION_LINE_RE.match(line)
+        if not match:
+            continue
+
+        indent = match.group("indent")
+        end_index = index + 1
+        while end_index < len(lines):
+            if lines[end_index] == indent + "end":
+                break
+            end_index += 1
+        if end_index >= len(lines):
+            continue
+
+        aliases = sorted(
+            {
+                alias
+                for body_line in lines[index + 1:end_index]
+                for alias in _PROTECTED_SLOT_ALIAS_RE.findall(body_line)
+            }
+        )
+        if aliases:
+            insertions.append((index + 1, indent + "\tlocal " + ", ".join(aliases)))
+
+    for index, declaration in reversed(insertions):
+        lines.insert(index, declaration)
+
+    suffix = "\n" if source.endswith("\n") else ""
+    return "\n".join(lines) + suffix
+
+
+def _localize_captured_initializers(source):
+    """Turn the first top-level initializer of each captured slot into local."""
+    lines = source.splitlines()
+    seen = set()
+    initializer_re = re.compile(r"^(capturedLocal\d+)\s*=")
+
+    for index, line in enumerate(lines):
+        match = initializer_re.match(line)
+        if not match or match.group(1) in seen:
+            continue
+        seen.add(match.group(1))
+        lines[index] = "local " + line
+
+    suffix = "\n" if source.endswith("\n") else ""
+    return "\n".join(lines) + suffix
 
 
 # ==========================================================================
@@ -87,6 +165,7 @@ def decompile_bytecode(source_bytes, source_name="<input>"):
     import ljd.ast.slotworks
     import ljd.ast.unwarper
     import ljd.ast.slotrenamer
+    import ljd.ast.upvaluerenamer
     import ljd.ast.dce
     import ljd.lua.writer
     import ljd.lua.postprocess
@@ -129,14 +208,20 @@ def decompile_bytecode(source_bytes, source_name="<input>"):
             ljd.ast.validator.validate(ast, warped=False)
         except (AssertionError, Exception):
             pass
-        ljd.ast.slotrenamer.rename_slots(ast)
         try:
             ljd.ast.dce.eliminate_dead_stores(ast)
         except Exception:
             pass
+        # DCE understands raw T_SLOT registers. Running it after the friendly
+        # renamer made generated locals look like user variables and kept
+        # decompiler-only alias assignments alive.
+        ljd.ast.upvaluerenamer.rename_upvalues(ast)
+        ljd.ast.slotrenamer.rename_slots(ast)
         buf = io.StringIO()
         ljd.lua.writer.write(buf, ast)
         source = ljd.lua.postprocess.postprocess(buf.getvalue())
+        source = _localize_protected_slot_aliases(source)
+        source = _localize_captured_initializers(source)
         return (0, source)
     except (Exception, RecursionError):
         pass
@@ -148,14 +233,17 @@ def decompile_bytecode(source_bytes, source_name="<input>"):
         ljd.ast.mutator.pre_pass(ast)
         ljd.ast.locals.mark_locals(ast)
         ljd.ast.slotworks.eliminate_temporary(ast)
-        ljd.ast.slotrenamer.rename_slots(ast)
         try:
             ljd.ast.dce.eliminate_dead_stores(ast)
         except Exception:
             pass
+        ljd.ast.upvaluerenamer.rename_upvalues(ast)
+        ljd.ast.slotrenamer.rename_slots(ast)
         buf = io.StringIO()
         ljd.lua.writer.write(buf, ast)
         source = ljd.lua.postprocess.postprocess(buf.getvalue())
+        source = _localize_protected_slot_aliases(source)
+        source = _localize_captured_initializers(source)
         return (1, source)
     except (Exception, RecursionError):
         pass
@@ -164,14 +252,17 @@ def decompile_bytecode(source_bytes, source_name="<input>"):
     try:
         ast = ljd.ast.builder.build(prototype)
         ljd.ast.mutator.pre_pass(ast)
-        ljd.ast.slotrenamer.rename_slots(ast)
         try:
             ljd.ast.dce.eliminate_dead_stores(ast)
         except Exception:
             pass
+        ljd.ast.upvaluerenamer.rename_upvalues(ast)
+        ljd.ast.slotrenamer.rename_slots(ast)
         buf = io.StringIO()
         ljd.lua.writer.write(buf, ast)
         source = ljd.lua.postprocess.postprocess(buf.getvalue())
+        source = _localize_protected_slot_aliases(source)
+        source = _localize_captured_initializers(source)
         return (2, source)
     except (Exception, RecursionError):
         pass
@@ -235,7 +326,8 @@ def process_directory(input_dir, output_dir, name_filter=None, force=False):
     """Processa todos os arquivos decriptados."""
     stats = {"total": 0, "ok": 0, "skipped": 0, "failed": 0,
              "level0": 0, "level1": 0, "level2": 0,
-             "stg": 0, "copied": 0}
+             "stg": 0, "copied": 0, "unresolved_warps": 0,
+             "unsafe_engine_writes": 0}
     failed_files = []
 
     if not os.path.isdir(input_dir):
@@ -304,6 +396,15 @@ def process_directory(input_dir, output_dir, name_filter=None, force=False):
             result = decompile_safe(data, rel)
             if result:
                 level, source = result
+                # Do not silently present an incomplete control-flow recovery as
+                # a perfect decompilation.  The writer keeps unresolved KL
+                # conditional warps as valid Lua comments, and we report their
+                # count here so callers can review the affected files.
+                unresolved = source.count("-- unresolved conditional warp")
+                stats["unresolved_warps"] += unresolved
+                stats["unsafe_engine_writes"] += len(
+                    _ENGINE_GLOBAL_WRITE_RE.findall(source)
+                )
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(source)
                     if not source.endswith('\n'):
@@ -323,17 +424,20 @@ def process_directory(input_dir, output_dir, name_filter=None, force=False):
                 stats["failed"] += 1
                 failed_files.append(rel)
         else:
-            # Não é KL — copiar como está
-            with open(out_path, "wb") as f:
+            # Nao e KL: salvar separado para nao parecer Lua decompilado.
+            raw_path = out_path + ".encrypted"
+            if os.path.isfile(out_path):
+                os.remove(out_path)
+            with open(raw_path, "wb") as f:
                 f.write(data)
-            stats["copied"] += 1
-            stats["ok"] += 1
+            stats["failed"] += 1
+            failed_files.append(rel)
 
         if (i % 20 == 0) or i == len(all_files):
             print(f"\r  [{i}/{len(all_files)}] {stats['ok']} OK, {stats['failed']} falhas...", end="", flush=True)
 
     elapsed = time.time() - t0
-    print(f"\r  {'─'*50}")
+    print(f"\r  {'-'*50}")
     print(f"  Concluído em {elapsed:.1f}s")
     print(f"  Total: {stats['ok']}/{stats['total']} processados")
     print(f"    L0 (completo):    {stats['level0']}")
@@ -348,6 +452,16 @@ def process_directory(input_dir, output_dir, name_filter=None, force=False):
             print(f"      - {f}")
         if len(failed_files) > 10:
             print(f"      ... e mais {len(failed_files) - 10}")
+    if stats["unresolved_warps"]:
+        print(f"    Warps não resolvidos: {stats['unresolved_warps']}")
+        print("      O Lua gerado é válido, mas esses pontos exigem revisão semântica.")
+
+    if stats["unsafe_engine_writes"]:
+        print(
+            "    Escritas perigosas em globais da engine: "
+            f"{stats['unsafe_engine_writes']}"
+        )
+        print("      Revise a renomeacao de slots antes de executar estes scripts.")
 
     return stats
 

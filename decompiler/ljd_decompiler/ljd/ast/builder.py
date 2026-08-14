@@ -14,6 +14,7 @@ class _State():
 	def __init__(self):
 		self.constants = None
 		self.debuginfo = None
+		self.is_kl = False
 		self.block = None
 		self.blocks = []
 		self.block_starts = {}
@@ -35,6 +36,7 @@ def _build_function_definition(prototype):
 
 	state.constants = prototype.constants
 	state.debuginfo = prototype.debuginfo
+	state.is_kl = getattr(prototype, "_is_kl", False)
 
 	node._upvalues = prototype.constants.upvalue_references
 	node._debuginfo = prototype.debuginfo
@@ -92,7 +94,8 @@ def _build_function_blocks(state, instructions):
 				# that eliminate_temporary can see it and method
 				# call detection works (self at args[0]).
 				opcode = instruction.opcode
-				if opcode >= ins.TGETV.opcode \
+				if state.is_kl \
+						and opcode >= ins.TGETV.opcode \
 						and opcode <= ins.TGETB.opcode \
 						and getattr(instruction, 'B', None) is not None:
 					synth = nodes.Assignment()
@@ -246,6 +249,14 @@ def _build_conditional_warp(state, last_addr, instructions):
 	condition_addr = last_addr - 1
 
 	warp = nodes.ConditionalWarp()
+	# Preserve the exact VM test kind for late recovery/fallback.  The generic
+	# condition AST alone cannot distinguish IST/ISF (test only) from ISTC/ISFC
+	# (test and copy), which is essential when the unwarper cannot consume it.
+	setattr(warp, "_opcode_name", condition.name)
+	setattr(warp, "_condition_addr", condition_addr)
+	if condition.opcode in (ins.ISTC.opcode, ins.ISFC.opcode):
+		setattr(warp, "_copy_slot", condition.A)
+		setattr(warp, "_test_slot", condition.CD)
 
 	if condition.opcode in (ins.ISTC.opcode, ins.ISFC.opcode):
 		expression = _build_unary_expression(state,
@@ -588,6 +599,7 @@ def _build_return(state, addr, instruction):
 def _build_call_arguments(state, addr, instruction):
 	base = instruction.A
 	last_argument_slot = base + instruction.CD
+	first_argument_slot = base + 1
 
 	is_variadic = (instruction.opcode == ins.CALLM.opcode	\
 			or instruction.opcode == ins.CALLMT.opcode)
@@ -598,13 +610,27 @@ def _build_call_arguments(state, addr, instruction):
 	# KL-specific: TGETS implicit self at A+1 shifts all real args up
 	# by one slot, but the compiler's CD didn't account for it.
 	# Detect TGETS→CALL pattern and extend arg range by 1.
-	if hasattr(state, '_instructions'):
+	if state.is_kl and hasattr(state, '_instructions'):
 		for pa in range(addr - 1, max(addr - 30, -1), -1):
 			prev = state._instructions[pa]
 			pop = prev.opcode
 			if pop >= ins.TGETV.opcode and pop <= ins.TGETB.opcode:
 				if prev.A == base:
+					# KL reserves A+1 for method calls.  The implicit
+					# self is stored at A+2 and real arguments start at
+					# A+3 (CALL.CD still describes the unshifted range).
+					first_argument_slot = base + 2
 					last_argument_slot += 1
+					break
+				# A nested call used as an argument may contain its own
+				# TGETS between this CALL and the method's TGETS.  It does
+				# not define our base slot, so keep scanning backwards.
+				continue
+			if pop == ins.GGET.opcode and prev.A == base:
+				# Direct KL global calls reserve A+1; real arguments
+				# begin at A+2 and CD excludes the reserved slot.
+				first_argument_slot = base + 2
+				last_argument_slot += 1
 				break
 			pa_type = getattr(prev, 'A_type', None)
 			if pa_type in (ins.T_DST, ins.T_BS) \
@@ -613,7 +639,7 @@ def _build_call_arguments(state, addr, instruction):
 
 	arguments = []
 
-	slot = base + 1
+	slot = first_argument_slot
 
 	while slot <= last_argument_slot:
 		argument = _build_slot(state, addr, slot)
@@ -900,10 +926,11 @@ def _build_identifier(state, addr, slot, want_type):
 
 	if want_type == nodes.Identifier.T_UPVALUE:
 		name = state.debuginfo.lookup_upvalue_name(slot)
-
-		if name is not None:
-			node.name = name
-			node.type = want_type
+		# Stripped bytecode has no textual upvalue names, but an upvalue is
+		# still a different register space from a local slot.  Keeping it as
+		# T_SLOT makes later passes conflate uv0 with function argument slot0.
+		node.name = name
+		node.type = want_type
 
 	return node
 
